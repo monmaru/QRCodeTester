@@ -3,22 +3,27 @@ using OpenCvSharp.Extensions;
 using Prism.Mvvm;
 using Reactive.Bindings;
 using System;
-using System.Reactive.Concurrency;
+using System.Collections.Generic;
 using System.Reactive.Linq;
 using System.Windows.Media.Imaging;
+using Reactive.Bindings.Extensions;
 using ZXing;
 
 namespace QRCodeTester.ViewModels
 {
     public class MainWindowViewModel : BindableBase
     {
-        public MainWindowViewModel() : this(new BarcodeReader())
+        public MainWindowViewModel()
         {
-        }
-
-        internal MainWindowViewModel(IBarcodeReader barcodeReader)
-        {
-            _barcodeReader = barcodeReader;
+            _barcodeReader = new ZXing.Presentation.BarcodeReader
+            {
+                AutoRotate = true,
+                Options =
+                {
+                    TryHarder = true,
+                    PossibleFormats = new List<BarcodeFormat>{ BarcodeFormat.QR_CODE }
+                },
+            };
             StartCommand = Capturing.Select(x => !x).ToReactiveCommand();
             StartCommand.Subscribe(_ => Start());
             StopCommand = Capturing.Select(x => x).ToReactiveCommand();
@@ -29,7 +34,7 @@ namespace QRCodeTester.ViewModels
             });
         }
 
-        private readonly IBarcodeReader _barcodeReader;
+        private readonly ZXing.Presentation.BarcodeReader _barcodeReader;
 
         public ReactiveProperty<bool> Capturing { get; } = new ReactiveProperty<bool>(false);
         public ReactiveProperty<string> ReadResult { get; } = new ReactiveProperty<string>(string.Empty);
@@ -44,7 +49,7 @@ namespace QRCodeTester.ViewModels
             Capturing.Value = true;
             ReadResult.Value = string.Empty;
 
-            Observable.Interval(TimeSpan.FromMilliseconds(1), DispatcherScheduler.Current)
+            Observable.Interval(TimeSpan.FromMilliseconds(1))
                 .Finally(() =>
                 {
                     capture.Dispose();
@@ -57,12 +62,15 @@ namespace QRCodeTester.ViewModels
                     return capture.Read(frame) ? frame : null;
                 })
                 .Where(frame => frame != null)
+                .ObserveOnUIDispatcher()     
                 .Subscribe(frame =>
                 {
                     using (frame)
                     {
-                        CaptureImageSource.Value = frame.ToBitmapSource();
-                        var result = _barcodeReader.Decode(frame.ToBitmap());
+                        var bitmapSource = frame.ToBitmapSource();
+                        CaptureImageSource.Value = bitmapSource;
+                        var result = _barcodeReader.Decode(bitmapSource);
+                    
                         if (result == null) return;
                         Capturing.Value = false;
                         ReadResult.Value = result.Text;
